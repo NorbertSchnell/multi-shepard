@@ -1,23 +1,23 @@
+import { voices } from './voices.js';
 const volumeSlider = document.querySelector('#volume-slider input');
 const volumeNumber = document.querySelector('#volume-slider .number-box');
 const speedSlider = document.querySelector('#speed-slider input');
 const speedNumber = document.querySelector('#speed-slider .number-box');
+const freqs = [20, 40, 80, 160, 320, 640, 1280, 2560, 5120, 10240, 20480];
+const amps = [0, 0.707, 1, 1, 1, 1, 1, 1, 1, 0.707, 0];
 const numOctaves = 10;
 const minFreq = 20;
-const freqs = [20, 40, 80, 160, 320, 640, 1280, 2560, 5120, 10240, 20480];
-const amps = [0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0];
 const controlPeriod = 0.01;
+const audioDeviceIndex = 10;
 let audioContext = null;
-let voices = null;
 let masterGain = null;
-let speed = 200; // cents per second
+let volume = volumeSlider.value; // %
+let speed = speedSlider.value; // cents per second
 let f0 = minFreq;
 let lastTime = 0;
 
-const audioDeviceIndex = 10;
-
 volumeSlider.addEventListener("input", (event) => {
-  const volume = event.target.value;
+  volume = event.target.value;
   masterGain.gain.value = volumeToLinear(volume);
   volumeNumber.innerHTML = volume;
 });
@@ -46,7 +46,7 @@ function getAmpForFreq(freq) {
 
   audioContext = setupAudio(audioOutput);
   const merger = setupOutputs();
-  voices = createVoices(merger, numOctaves);
+  initVoices(voices, merger);
 
   startGlissando();
 })();
@@ -60,7 +60,6 @@ async function listAudioDevices() {
   const devices = await navigator.mediaDevices.enumerateDevices();
 
   console.log(`audio output devices:`);
-
   for (let i = 0; i < devices.length; i++) {
     let device = devices[i];
 
@@ -73,7 +72,7 @@ async function listAudioDevices() {
 }
 
 function setupAudio(audioOutput) {
-  const audioContext = new AudioContext({ sinkId: audioOutput.deviceId });
+  const audioContext = new AudioContext({ sinkId: audioOutput.deviceId, latencyHint: 'balanced' });
   const maxChannelCount = audioContext.destination.maxChannelCount;
 
   audioContext.destination.channelCount = maxChannelCount;
@@ -90,7 +89,7 @@ function setupOutputs() {
 
   masterGain = audioContext.createGain();
   masterGain.connect(audioContext.destination);
-  masterGain.gain.value = volumeToLinear(80);
+  masterGain.gain.value = volumeToLinear(volume);
 
   const channelMerger = audioContext.createChannelMerger(numOutputs);
   channelMerger.connect(masterGain);
@@ -103,32 +102,33 @@ function setupOutputs() {
   return channelMerger;
 }
 
-function createVoices(merger, numVoices) {
+function initVoices(voices, merger) {
   const time = audioContext.currentTime;
-  const voices = [];
   const numChannels = merger.numberOfInputs;
 
   console.log(`setting up ${numChannels} voices:`);
 
-  for (let i = 0; i < numVoices; i++) {
-    const octave = i % numOctaves;
+  for (let i = 0; i < voices.length; i++) {
+    const voice = voices[i];
+    const octave = voice.octave;
+    const channel = voice.channel;
     const freq = f0 * (2 ** octave);
 
     const gain = audioContext.createGain();
     gain.gain.value = 1;
-    const ch = i % numChannels;
+    const ch = channel % numChannels;
     gain.connect(merger, 0, ch);
 
     const osc = audioContext.createOscillator();
     osc.connect(gain);
-    osc.type = 'sawtooth';
+    osc.type = voice.waveform;
     osc.frequency.value = freq;
     osc.start(time);
 
-    console.log(`  ${freq}Hz`);
+    console.log(`  osc ${i}: channel ${channel}, octave ${octave}, ${freq}Hz`);
 
-    const voice = { osc, gain, octave };
-    voices.push(voice);
+    voice.gain = gain;
+    voice.osc = osc;
   }
 
   return voices;
@@ -182,14 +182,6 @@ function onControlFrame() {
   lastTime = time;
 }
 
-function setWaveForm(type) {
-  for (let i = 0; i < voices.length; i++) {
-    const voice = voices[i];
-    const osc = voice.osc;
-
-  }
-}
-
 function centToLinear(val) {
   return Math.exp(0.0005776226504666211 * val); // pow(2, val / 1200)
 };
@@ -201,4 +193,3 @@ function volumeToLinear(volume) {
 function decibelToLinear(val) {
   return Math.exp(0.11512925464970229 * val); // pow(10, val / 20)
 };
-
